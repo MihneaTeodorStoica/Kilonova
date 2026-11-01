@@ -91,6 +91,11 @@ var Migrations = postgres.MigrationConfig{
 			Name:    "Runtime flag store",
 			Handler: runFile("015.flags.sql"),
 		},
+		{
+			ID:      110,
+			Name:    "Full-text problem statement search",
+			Handler: runFile("110.statement_search.sql"),
+		},
 	},
 	// Run every time a migrate up happens
 	SpecialMigrations: []postgres.Migration{

@@ -22,6 +22,19 @@ Examples of common attachment names include:
 Markdown statements like `statement-ro.md` and `statement-en.md` can be considered the authoritative source of the
 statement.
 
+# Searching statements
+
+The problem search matches problem IDs and names as well as the text of accessible Markdown statement variants.
+Search ignores accents, supports `"quoted phrases"`, `OR` and `-excluded` words, and shows a highlighted excerpt
+linking to the matching variant. The statement-language filter limits statement matches to that language. PDFs
+and malformed UTF-8 Markdown attachments are not indexed. Private variants are searchable only by users who can
+edit the problem, and unpublished problems remain subject to normal problem visibility.
+
+PostgreSQL migration 110 builds the search index for existing Markdown attachments and keeps it up to date when
+attachments are created, renamed, edited, or deleted. Large statements are indexed in overlapping fragments;
+all words of an individual match must occur in the same fragment. Search input waits 600 ms after typing and
+replaces the current history entry; filters and pagination remain navigable with Back and Forward.
+
 # How it relates to the API
 
 The API interprets the attachment names and generates a curated list of statement **variants**. The variants are

@@ -160,6 +160,8 @@ type FullProblem struct {
 
 	SolvedBy    int `json:"solved_by"`
 	AttemptedBy int `json:"attempted_by"`
+
+	SearchPreview *kilonova.ProblemSearchPreview `json:"search_preview,omitempty"`
 }
 
 // SearchProblems is like the functions above but returns more detailed results for problems
@@ -175,6 +177,11 @@ func (s *BaseAPI) SearchProblems(ctx context.Context, filter kilonova.ProblemFil
 	ids := make([]int, 0, len(pbs))
 	for _, pb := range pbs {
 		ids = append(ids, pb.ID)
+	}
+
+	previews, err := s.db.ProblemSearchPreviews(ctx, filter, ids)
+	if err != nil {
+		return nil, -1, fmt.Errorf("couldn't get problem search previews: %w", err)
 	}
 
 	tagMap, err := s.db.ManyProblemsTags(ctx, ids)
@@ -223,6 +230,7 @@ func (s *BaseAPI) SearchProblems(ctx context.Context, filter kilonova.ProblemFil
 			AttemptedBy:   stat.NumAttemptedBy,
 			SolvedBy:      stat.NumSolvedBy,
 			Tags:          tags,
+			SearchPreview: previews[pb.ID],
 		})
 	}
 

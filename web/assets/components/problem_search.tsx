@@ -16,6 +16,8 @@ type FullProblem = Problem & {
 
 	solved_by: number;
 	attempted_by: number;
+
+	search_preview?: {text: string; language: string; variant: string};
 };
 
 function numPagesF(count: number, max: number): number {
@@ -103,6 +105,17 @@ export function ProblemView({
 							)}
 
 						</>)}
+						{pb.search_preview && (
+							<p class="text-sm mt-2 break-words">
+								<a class="block" href={`/problems/${pb.id}?var=${encodeURIComponent(pb.search_preview.variant)}`}>
+									<span class="font-bold mr-1">{pb.search_preview.language.toUpperCase()}:</span>
+									{pb.search_preview.text.split(/(\uE000[^\uE001]*\uE001)/g).map((part) =>
+										part.startsWith("\uE000")
+											? <mark>{part.slice(1, -1)}</mark>
+											: part)}
+								</a>
+							</p>
+						)}
 					</td>
 					{showTags ? (
 						<td>{pb.tags.length == 0 ? "-" : pb.tags.map((tag) => <TagView tag={tag}
@@ -244,6 +257,15 @@ function makeTagString(groups: TagGroup[]): string {
 	return groups.map((gr) => (gr.negate ? "!" : "") + gr.tag_ids.map((tag) => tag.toString()).join("_")).join(",");
 }
 
+function parseTagGroups(value: string | null): TagGroup[] {
+	return (value ?? "").split(",").flatMap((group) => {
+		const negate = group.startsWith("!");
+		const tag_ids = (negate ? group.slice(1) : group).split("_")
+			.filter((id) => /^\d+$/.test(id)).map(Number).filter((id) => id > 0);
+		return tag_ids.length > 0 ? [{negate, tag_ids}] : [];
+	});
+}
+
 function initialQuery(params: URLSearchParams, groups: TagGroup[]): ProblemQuery {
 	const page = parseInt(params.get("page") ?? "");
 	let published: boolean | undefined;
@@ -283,7 +305,7 @@ function initialQuery(params: URLSearchParams, groups: TagGroup[]): ProblemQuery
 
 	return {
 		textQuery: params.get("q") ?? "",
-		page: !isNaN(page) && page != 0 ? page : 1,
+		page: !isNaN(page) && page > 0 ? page : 1,
 
 		deep_list_id: !isNaN(deepListID) ? deepListID : undefined,
 
@@ -302,7 +324,7 @@ function initialQuery(params: URLSearchParams, groups: TagGroup[]): ProblemQuery
 
 function serializeQuery(f: ProblemQuery, max_cnt: number = MAX_PER_PAGE): any {
 	return {
-		name_fuzzy: f.textQuery,
+		search: f.textQuery,
 		editor_user_id: typeof f.editor_user !== "undefined" && f.editor_user > 0 ? f.editor_user : undefined,
 		visible: f.published,
 
@@ -341,6 +363,11 @@ function ProblemSearch(params: {
 	pblist: ProblemList | null
 }) {
 	let [query, setQuery] = useState<ProblemQuery>(initialQuery(new URLSearchParams(window.location.search), params.groups));
+	const [draft, setDraft] = useState(query.textQuery);
+	const [loading, setLoading] = useState(false);
+	const historyMode = useRef<"push" | "replace" | "none">("push");
+	const requestVersion = useRef(0);
+	const searchTimer = useRef<number | undefined>(undefined);
 	let [problems, setProblems] = useState<FullProblem[]>(params.problems);
 	let [count, setCount] = useState<number>(params.count);
 	let numPages = useMemo(() => numPagesF(count, MAX_PER_PAGE), [count]);
@@ -356,28 +383,24 @@ function ProblemSearch(params: {
 
 	let [advOptions, setAdvOptions] = useState<boolean>(false);
 
-	async function load() {
-		const rez = await bodyCall<{
-			problems: FullProblem[];
-			count: number
-		}>("/problem/search", serializeQuery(query));
+	async function load(current: ProblemQuery) {
+		const version = ++requestVersion.current;
+		setLoading(true);
+		const rez = await bodyCall<{problems: FullProblem[]; count: number}>(
+			"/problem/search", serializeQuery(current));
+		// A slower earlier search must never overwrite a newer query or navigation.
+		if (version !== requestVersion.current) return;
+		setLoading(false);
 		if (rez.status === "error") {
 			apiToast(rez);
 			return;
 		}
 		setCount(rez.data.count);
 		setProblems(rez.data.problems);
-		let str = getQuery().toString();
-		if (str.length > 0) str = "?" + str;
-		const newName = window.location.pathname + str;
-		if (window.location.pathname + window.location.search != newName) {
-			history.pushState({}, "", newName);
-		}
 	}
 
-	function getQuery() {
-		var p = new URLSearchParams();
-		console.log(query);
+	function getQuery(query: ProblemQuery) {
+		const p = new URLSearchParams();
 		if (query.textQuery != "") {
 			p.append("q", query.textQuery);
 		}
@@ -390,6 +413,9 @@ function ProblemSearch(params: {
 		}
 		if (typeof query.editor_user !== "undefined" && query.editor_user > 0) {
 			p.append("editor_user", query.editor_user.toString());
+		}
+		if (typeof query.review_requested !== "undefined") {
+			p.append("review_requested", String(query.review_requested));
 		}
 
 		if (query.tags.length > 0) {
@@ -413,7 +439,8 @@ function ProblemSearch(params: {
 	}
 
 	async function copyQuery() {
-		let url = window.location.origin + window.location.pathname + "?" + getQuery().toString();
+		const copied = {...query, textQuery: draft, page: draft === query.textQuery ? query.page : 1};
+		let url = window.location.origin + window.location.pathname + "?" + getQuery(copied).toString();
 		try {
 			await navigator.clipboard.writeText(url);
 			createToast({status: "success", title: getText("copied")});
@@ -429,57 +456,116 @@ function ProblemSearch(params: {
 		if (newMode == "simple") {
 			if (getModeByGroups(query.tags) == "complex") {
 				// It's not possible to turn a complex query into a simple one
-				setQuery({...query, tags: []});
+				setQuery({...query, page: 1, tags: []});
 			}
 		}
 	}
 
+	function tagByID(id: number): Tag {
+		return tags.find((tag) => tag.id === id) ?? {id, name: `#${id}`, type: "other"};
+	}
+
+	function commitSearch() {
+		clearTimeout(searchTimer.current);
+		if (draft === query.textQuery) {
+			load(query).catch(console.error);
+			return;
+		}
+		historyMode.current = "replace";
+		setQuery({...query, textQuery: draft, page: 1});
+	}
+
 	useEffect(() => {
-		if (mounted.current) load()?.catch(console.error);
-		else mounted.current = true;
+		if (draft === query.textQuery) return;
+		searchTimer.current = window.setTimeout(() => {
+			historyMode.current = "replace";
+			setQuery((current) => ({...current, textQuery: draft, page: 1}));
+		}, 600);
+		return () => clearTimeout(searchTimer.current);
+	}, [draft, query.textQuery]);
+
+	useEffect(() => {
+		if (!mounted.current) {
+			mounted.current = true;
+			return;
+		}
+		const search = getQuery(query).toString();
+		const url = window.location.pathname + (search ? "?" + search : "") + window.location.hash;
+		if (historyMode.current !== "none" && url !== window.location.pathname + window.location.search + window.location.hash) {
+			if (historyMode.current === "replace") history.replaceState({}, "", url);
+			else history.pushState({}, "", url);
+		}
+		historyMode.current = "push";
+		load(query).catch(console.error);
+		return () => { requestVersion.current++; };
 	}, [query]);
 
 	useEffect(() => {
-		const historyPopEvent = async (e) => {
-			// TODO: Keep tag groups
-			setQuery(initialQuery(new URLSearchParams(window.location.search), []));
+		const historyPopEvent = () => {
+			clearTimeout(searchTimer.current);
+			requestVersion.current++;
+			historyMode.current = "none";
+			const params = new URLSearchParams(window.location.search);
+			const restored = initialQuery(params, parseTagGroups(params.get("tags")));
+			setDraft(restored.textQuery);
+			setTagFilterMode(getModeByGroups(restored.tags));
+			setQuery(restored);
 		};
 		window.addEventListener("popstate", historyPopEvent);
-		return () => window.removeEventListener("popstate", historyPopEvent);
-	});
+		return () => {
+			window.removeEventListener("popstate", historyPopEvent);
+			requestVersion.current++;
+		};
+	}, []);
 
 	useEffect(() => {
-		console.log(problemList, query);
+		if (!query.tags.some((group) => group.tag_ids.some((id) => !tags.some((tag) => tag.id === id)))) return;
 		const controller = new AbortController();
-		if (problemList == null && typeof query.deep_list_id !== "undefined" && query.deep_list_id > 0) {
-			getCall<ProblemList>(`/problemList/${query.deep_list_id}`, {}, controller.signal).then((rez) => {
-				if (rez.status == "error") {
-					setProblemList(false);
-					return;
-				}
-				setProblemList(rez.data);
-			});
+		getCall<Tag[]>("/tags/", {}, controller.signal).then((rez) => {
+			if (!controller.signal.aborted && rez.status === "success") {
+				setTags((current) => [...current, ...rez.data.filter((tag) => !current.some((t) => t.id === tag.id))]);
+			}
+		});
+		return () => controller.abort();
+	}, [query.tags, tags]);
+
+	useEffect(() => {
+		if (!query.deep_list_id) {
+			setProblemList(null);
+			return;
 		}
-		return () => controller.abort("Stale");
-	}, [query, problemList]);
+		if (typeof problemList === "object" && problemList?.id === query.deep_list_id) return;
+		const controller = new AbortController();
+		setProblemList(null);
+		getCall<ProblemList>(`/problemList/${query.deep_list_id}`, {}, controller.signal).then((rez) => {
+			if (!controller.signal.aborted) setProblemList(rez.status === "success" ? rez.data : false);
+		});
+		return () => controller.abort();
+	}, [query.deep_list_id]);
 
 	return (
 		<div class="segment-panel">
 			<h1>{getText("problems")}</h1>
-			<h2>{rezStr(count, false)}</h2>
+			<h2 role="status">{loading ? getText("loading") : rezStr(count, false)}</h2>
 			<div class="flex mx-auto gap-2 align-middle my-2">
 				<input
 					class="form-input grow"
 					type="text"
+					aria-label={getText("problem_search.label")}
+					aria-describedby="problem-search-help"
 					placeholder={getText("search_pb")}
 					onInput={(e) => {
-						setQuery({
-							...query,
-							page: 1,
-							textQuery: e.currentTarget.value,
-						});
+						requestVersion.current++;
+						setLoading(false);
+						setDraft(e.currentTarget.value);
 					}}
-					value={query.textQuery}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" && !e.isComposing) {
+							e.preventDefault();
+							commitSearch();
+						}
+					}}
+					value={draft}
 					autofocus={true}
 				/>
 				<button class="btn btn-blue" onClick={() => setAdvOptions(!advOptions)}>
@@ -487,6 +573,7 @@ function ProblemSearch(params: {
 					class={`ml-1 fas ${advOptions ? "fa-caret-up" : "fa-caret-down"}`}></i>
 				</button>
 			</div>
+			<p id="problem-search-help" class="text-sm my-2">{getText("problem_search.help")}</p>
 
 			{advOptions && (
 				<div class="segment-panel">
@@ -549,17 +636,18 @@ function ProblemSearch(params: {
 								{query.tags.length == 0
 									? getText("no_selected_tags")
 									: query.tags.map((gr) => gr.tag_ids.map((id) => <TagView
-										tag={tags.find((t) => t.id == id)!} link={false}/>))}
+										tag={tagByID(id)} link={false}/>))}
 								<a
 									class="mx-1"
 									href="#"
 									onClickCapture={(e) => {
 										e.preventDefault();
-										selectTags(tags).then((rez) => {
+										selectTags(query.tags.flatMap((group) => group.tag_ids.map(tagByID))).then((rez) => {
 											if (rez.updated) {
-												setTags(rez.tags);
+												setTags((current) => [...current.filter((tag) => !rez.tags.some((t) => t.id === tag.id)), ...rez.tags]);
 												setQuery({
 													...query,
+													page: 1,
 													tags: rez.tags.map((t) => ({negate: false, tag_ids: [t.id]})),
 												});
 											}
@@ -580,6 +668,7 @@ function ProblemSearch(params: {
 													e.preventDefault();
 													setQuery({
 														...query,
+														page: 1,
 														tags: query.tags.filter((_, idx1) => idx != idx1)
 													});
 												}}
@@ -591,6 +680,7 @@ function ProblemSearch(params: {
 													e.preventDefault();
 													setQuery({
 														...query,
+														page: 1,
 														tags: query.tags.map((val, idx1) => {
 															if (idx != idx1) return val;
 															return {negate: !val.negate, tag_ids: val.tag_ids};
@@ -603,7 +693,7 @@ function ProblemSearch(params: {
 											</span>{" "}
 											{val.negate && getText("tag_complex_not")}{" "}
 											{val.tag_ids.map((id) => (
-												<TagView tag={tags.find((t) => t.id == id)!} link={false}/>
+												<TagView tag={tagByID(id)} link={false}/>
 											))}
 											<a
 												class="mx-1"
@@ -611,7 +701,7 @@ function ProblemSearch(params: {
 												onClickCapture={(e) => {
 													e.preventDefault();
 													selectTags(
-														val.tag_ids.map((id) => tags.find((t) => t.id == id)!),
+														val.tag_ids.map(tagByID),
 														false
 													).then((rez) => {
 														if (rez.updated && rez.tags.length > 0) {
@@ -622,9 +712,9 @@ function ProblemSearch(params: {
 															if (missingTags.length > 0) {
 																setTags([...tags, ...missingTags]);
 															}
-															console.log(tags);
 															setQuery({
 																...query,
+																page: 1,
 																tags: query.tags.map((val, idx1) => {
 																	if (idx != idx1) return val;
 																	return {
@@ -656,9 +746,9 @@ function ProblemSearch(params: {
 														if (missingTags.length > 0) {
 															setTags([...tags, ...missingTags]);
 														}
-														console.log(tags);
 														setQuery({
 															...query,
+															page: 1,
 															tags: [...query.tags, {
 																negate: false,
 																tag_ids: rez.tags.map((t) => t.id)
@@ -731,7 +821,7 @@ function ProblemSearch(params: {
 			)}
 
 			<div class="block my-2">
-				<button class="btn btn-blue mr-2" onClick={() => load()}>
+				<button class="btn btn-blue mr-2" onClick={commitSearch}>
 					{getText("button.filter")}
 				</button>
 				<button class="btn" onClick={async () => await copyQuery()}>

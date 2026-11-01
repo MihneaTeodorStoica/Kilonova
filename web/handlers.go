@@ -294,7 +294,7 @@ func (rt *Web) problems() http.HandlerFunc {
 
 		pbs, cnt, err := rt.base.SearchProblems(r.Context(), kilonova.ProblemFilter{
 			LookingUser: user.UserBrief(r), Look: true,
-			FuzzyName: q.Query, EditorUserID: q.Editor, Visible: q.Visible,
+			Search: q.Query, EditorUserID: q.Editor, Visible: q.Visible,
 			DeepListID: q.DeepListID, Language: lang,
 			ReviewRequested: q.ReviewRequested,
 

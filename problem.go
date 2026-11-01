@@ -103,6 +103,14 @@ type ScoredProblem struct {
 	IsEditor bool `json:"is_editor"`
 }
 
+// ProblemSearchPreview is plain text with U+E000/U+E001 marking matched words.
+// Consumers must escape it as text, not render it as HTML.
+type ProblemSearchPreview struct {
+	Text     string `json:"text"`
+	Language string `json:"language"`
+	Variant  string `json:"variant"`
+}
+
 // ProblemFilter is the struct with all filterable fields on the problem
 // It also provides a Limit and Offset field, for pagination
 // This list might be expanded as time goes on
@@ -114,6 +122,9 @@ type ProblemFilter struct {
 	Name         *string `json:"name"`
 
 	FuzzyName *string `json:"name_fuzzy"`
+
+	// Search matches the problem ID or name and visible Markdown statements.
+	Search *string `json:"search"`
 
 	// DeepListID - the list ID in which to search recursively for problems
 	DeepListID *int `json:"deep_list_id"`

@@ -254,6 +254,13 @@ func problemFilterQuery(filter *kilonova.ProblemFilter) sq.And {
 	if v := filter.FuzzyName; v != nil {
 		sb = append(sb, sq.Expr("position(lower(unaccent(?)) in format('#%s %s', id, lower(unaccent(name)))) > 0", v))
 	}
+	if v := filter.Search; v != nil && strings.TrimSpace(*v) != "" {
+		statements := statementSearchQuery(filter).Column("1")
+		sb = append(sb, sq.Or{
+			sq.Expr("position(lower(unaccent(?)) in format('#%s %s', id, lower(unaccent(name)))) > 0", strings.TrimSpace(*v)),
+			sq.Expr("EXISTS (?)", statements),
+		})
+	}
 	if v := filter.DeepListID; v != nil {
 		sb = append(sb, sq.Expr("EXISTS (SELECT 1 FROM problem_list_deep_problems WHERE list_id = ? AND problem_id = problems.id)", v))
 	}

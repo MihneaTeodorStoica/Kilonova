@@ -2689,6 +2689,14 @@ ro = "Probleme cu această etichetă"
 en = "Search"
 ro = "Căutare"
 
+[problem_search.label]
+en = "Search problem names, IDs and statements"
+ro = "Caută în numele, ID-urile și enunțurile problemelor"
+
+[problem_search.help]
+en = 'Search names, IDs and Markdown statements. Use "quoted phrases", OR or -excluded words. Statement previews link to the matching language. Searches update after a short pause without adding browsing history.'
+ro = 'Caută în nume, ID-uri și enunțuri Markdown. Poți folosi "expresii între ghilimele", OR sau -cuvinte excluse. Previzualizările trimit la limba enunțului găsit. Căutarea se actualizează după o scurtă pauză, fără a adăuga intrări în istoricul de navigare.'
+
 [search_user]
 en = "Search"
 ro = "Căutare"

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Problem search now finds accessible Markdown statement text with accent-insensitive matching, quoted phrases,
+  alternatives and exclusions, and shows a highlighted preview linking to the matched statement variant.
+  PostgreSQL migration 110 backfills and maintains the statement index; PDF-only statements are not indexed.
+- Search input is debounced and replaces rather than adds history entries. Filter and pagination navigation,
+  including Back and Forward, retain the complete search state.
+
 ## v26.09 (2026-09-19)
 
 First release under the new `YY.MM` versioning scheme. Everything since v0.25.2.

@@ -359,6 +359,8 @@ type fullSearchProblem struct {
 	AttemptedBy int `json:"attempted_by"`
 
 	ReviewRequestedAt *time.Time `json:"review_requested_at"`
+
+	SearchPreview *kilonova.ProblemSearchPreview `json:"search_preview,omitempty"`
 }
 
 type problemSearchResult struct {
@@ -387,6 +389,7 @@ func getSearchProblem(pb *sudoapi.FullProblem) *fullSearchProblem {
 		SolvedBy:          pb.SolvedBy,
 		AttemptedBy:       pb.AttemptedBy,
 		ReviewRequestedAt: pb.ReviewRequestedAt,
+		SearchPreview:     pb.SearchPreview,
 	}
 }
 
@@ -685,6 +688,8 @@ type ProblemGetInput struct {
 
 		FuzzyName *string `json:"fuzzyName,omitempty"`
 
+		Search *string `json:"search,omitempty" doc:"Search problem IDs, names and accessible Markdown statements. Supports quoted phrases, OR and -excluded terms."`
+
 		// // DeepListID - the list ID in which to search recursively for problems
 		// DeepListID *int `json:"deepListID,omitempty"`
 		//
@@ -723,6 +728,7 @@ func (s *API) problemGet(ctx context.Context, input *ProblemGetInput) (*ProblemG
 			IDs:       input.Body.IDs,
 			Name:      input.Body.Name,
 			FuzzyName: input.Body.FuzzyName,
+			Search:    input.Body.Search,
 			Tags:      input.Body.Tags,
 			Language:  input.Body.Language,
 
